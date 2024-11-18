@@ -1,0 +1,225 @@
+---
+  title: "Frequency of cells per cluster"
+author: "Emma Bishop and Brooke"
+output:
+  html_document:
+  toc: yes
+toc_depth: 4
+toc_float:
+  collapsed: no
+date: "version `r format(Sys.time(), '%B %d, %Y')`"
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Intro
+
+Differential gene expression (DGE) analysis using pseudo-bulking and DESeq2. This will help inform if any annotated clusters can be collapsed, which would help simplify cell-cell communication analysis and DGE re-analysis.
+
+# Load libraries and data
+
+```{r, message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(CellChat)
+library(svglite)
+library(ggrepel)
+library(gridExtra)
+library(ggpubr)
+
+set.seed(4)
+
+script_output_dir <- "C:/Users/bdk45/OneDrive - UW/KennedyBrooke/Projects/BCG challenge (INH & RIF)/Rscript"
+```
+
+Load integrated, annotated data
+
+```{r, message=FALSE, warning=FALSE}
+bcgskin_integ <- readRDS(file = file.path("C:/Users/bdk45/OneDrive - UW/2022_BCGChallenge/Analysis/bcg_challenge_out_both_gex/processed_data/9_bcgskin_annot.rds"))
+```
+
+# Prep data
+
+* Untreated PTIDs
+* Enough cells (10+) and unique PTIDs (2+) at each timepoint for each cell type
+
+Modify metadata to make life easier downstream.
+
+```{r}
+bcgskin_integ@meta.data <- bcgskin_integ@meta.data %>%
+  mutate(
+    # Add ARM info form control data so we can subset by that
+    ARM = case_when(
+      Timepoint == "CTRL" ~ "CTRL",
+      .default = ARM),
+    # Replace underscores with dashes which will happen anyway during aggregation
+    eb_manual = gsub("_", "-", eb_manual),
+    # Append some characters so no PTIDs start with a number
+    PTID = paste("ptid", PTID, sep = ""),
+    # Fix the fact that 27 was mislabelled
+    umap_label = case_when(
+      umap_legend == "27: Tcell_CREM+" ~ "27",
+      .default = umap_label)
+  )
+
+bcgskin_integ@meta.data <- bcgskin_integ@meta.data %>%
+  mutate(umap_label = factor(umap_label, levels = c("0", "1", "2", "3", "4", "5", 
+                                                    "6", "7", "8", "9", "10", "11",
+                                                    "12", "13", "14", "15", "16", 
+                                                    "17", "18", "19", "20", "21",
+                                                    "22", "23", "24", "25", "26", "27"))
+  )
+```
+
+Subset, keeping just untreated PTIDs. This includes healthy control, day 3, and day 15 PTIDs.
+
+```{r}
+untx <- subset(bcgskin_integ, subset = ARM %in% c("CTRL", "Non-INH", "Non-RIF"))
+Idents(untx) <- "eb_manual"
+```
+
+# UMAP of untreated cells
+
+```{r}
+# Just have axis lines in the corner
+axis <- ggh4x::guide_axis_truncated(
+  trunc_lower = unit(0, "npc"),
+  trunc_upper = unit(1.75, "cm")
+)
+
+umap_plt <- DimPlot(untx, label = TRUE, 
+                    group.by = "umap_label", pt.size = 0.005) +
+  NoLegend() +
+  guides(x = axis, y = axis) +
+  theme(text = element_text(family="Arial"),
+        plot.title = element_blank(),
+        axis.line = element_line(arrow = grid::arrow(length = unit(0.3, "cm"),
+                                                     ends = "last")),
+        axis.title = element_text(hjust = 0.01),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        plot.margin = grid::unit(c(0,0,0,0), 'cm')) +
+  scale_x_discrete("UMAP1") +
+  scale_y_discrete("UMAP2")
+
+
+umap_legend_plt <- DimPlot(untx, label = TRUE, 
+                           group.by = "umap_legend", pt.size = 0.005) +
+  guides(x = axis, y = axis) +
+  theme(text = element_text(family="Arial"),
+        plot.title = element_text(size = 18, face = "plain"),
+        axis.line = element_line(arrow = grid::arrow(length = unit(0.3, "cm"),
+                                                     ends = "last")),
+        axis.title = element_text(hjust = 0.01),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        legend.text = element_text(size = 12),
+        plot.margin = grid::unit(c(0,0,0,0), 'cm')) +
+  scale_x_discrete("UMAP1") +
+  scale_y_discrete("UMAP2")
+
+umap_legend <- ggpubr::get_legend(umap_legend_plt)
+umap_legend <- as_ggplot(umap_legend)
+
+umap_final <- umap_plt + umap_legend
+umap_final
+```
+
+
+# Make table of cell counts per PTID, timepoint, and cluster 
+````{r,message=FALSE}
+#Combine fibroblast clusters 
+untx@meta.data <- untx@meta.data %>%
+                  mutate(eb_manual = case_when(umap_label == "6" ~ "Fibroblast", 
+                                               umap_label == "7" ~ "Fibroblast",
+                                               .default = eb_manual))
+
+cell_counts <- as.data.frame(table(untx$PTID,untx$eb_manual))
+colnames(cell_counts) <- c("PTID","Cell_type","Frequency")
+cell_counts <- pivot_wider(cell_counts, names_from="Cell_type", values_from = "Frequency")
+
+total_cells <- as.data.frame(table(untx$PTID))
+colnames(total_cells) <- c("PTID","Total_cells")
+
+cell_counts <- merge(cell_counts, total_cells, by="PTID")
+
+remove(total_cells)
+```
+
+# Transform cell counts into frequencies of total cells per patient 
+````{r,message=FALSE}
+freq_counts <- cell_counts %>% 
+                mutate()
+
+```
+
+# Make boxplot of frequency and calculate P-values 
+````{r,message=FALSE}
+colnames(Fibroblast_MMP1_frequencies) <- c("PTID","Group","Count","Proportion")
+
+ggplot(Fibroblast_MMP1_frequencies, aes(x = Group, y = Proportion, fill = Group)) +
+    geom_boxplot() + 
+    scale_fill_brewer(palette = "Set3") +
+    labs(title = "Frequency of MMP1+ Fibroblasts",
+         x = "Group",
+         y = "Proportion of Total Cells (%)") +
+    theme_minimal() +
+    stat_compare_means(method = "wilcox.test", label.x = 1.5) 
+
+````
+
+
+# Cassie's code 
+```{r}
+library(tidyverse) 
+library(dplyr) 
+library(ggplot2) 
+library(cowplot) 
+library(viridis) 
+library(ggpubr) 
+library(here) 
+library(RColorBrewer) 
+library(rstatix) 
+library(Cairo) 
+
+## Read in data ## 
+# Background subtracted cytokine specific data 
+f50_ifnghi_cd1b <- read_csv(file = "out/dataframes/Frequencies_bgsub_50ngmL_IFNg_hi_cd1b") 
+
+## Merge data, excluding populations except CD1b MA and CD1b GMM specific T cells ## 
+f50_ifnghi_tet <- f50_ifnghi_cd1b %>%   filter (Cell_type == "CD1bMA_IFNg_hi" | Cell_type == "CD1bGMM_IFNg_hi") 
+
+## Perform statistical testing ## 
+Fibroblast_MMP1_frequencies <- Fibroblast_MMP1_frequencies %>%   
+dunn_test(Timepoint ~ Proportion, p.adjust.method = "bonferroni") %>%   
+adjust_pvalue() %>%   
+add_significance() %>%   
+filter(p.adj.signif != "ns") 
+
+## Make plots ## 
+# Palettes 
+palette2 <- c("lightblue3", "darkolivegreen")
+
+# Specify cell_type order 
+f50_ifnghi_tet$Cell_type <- factor(f50_ifnghi_tet$Cell_type, levels = c("CD1bMA_IFNg_hi", "CD1bGMM_IFNg_hi")) 
+
+# Barplot 
+ifng_tet <- ggbarplot(f50_ifnghi_tet, x = "Cell_type",           
+y = "IFNg_hi_freq",           
+color = "black", fill ="Cell_type", palette = palette2,           
+add = c("mean_sd", "jitter")) +   
+labs(y = "Induced IFN\U03B3 Expression") +   
+scale_x_discrete(name = " ", labels=c("CD1bGMM_IFNg_hi" = "CD1b \nGMM",                                         "CD1bMA_IFNg_hi" = "CD1b \nMA")) +   stat_pvalue_manual(f50_ifnghi_tet_s, label = "p.adj.signif", y.position = 99, step.increase = 0.065, size = 7) +   
+scale_y_continuous(n.breaks = 6, limits = c(-1,100)) +   
+theme_bw(base_size = 24) +   
+theme(legend.position = "none") +   
+ggtitle("Ex-vivo PBMC") 
+
+#Save plot
+png("out/plots/IFNg_hi_tet_bgsub.png", 400, 425) 
+plot(ifng_tet) 
+dev.off()
+```
